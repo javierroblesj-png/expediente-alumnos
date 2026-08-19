@@ -14,9 +14,13 @@
       <p class="text-sm text-gray-500">Expediente de alumnos y cálculo dinámico de Estadística Inicial / Final</p>
     </header>
 
-    <!-- FORMULARIO DE REGISTRO -->
+    <!-- FORMULARIO DE REGISTRO / EDICIÓN -->
     <section class="bg-white p-6 rounded-xl shadow-md border border-gray-100">
-      <h2 class="text-xl font-semibold mb-4 text-gray-700">Registro de Alumno</h2>
+      <div class="flex justify-between items-center mb-4">
+        <h2 id="formTitle" class="text-xl font-semibold text-gray-700">Registro de Alumno</h2>
+        <button type="button" id="btnCancelar" class="hidden text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-1 px-3 rounded-md">Cancelar Edición</button>
+      </div>
+
       <form id="studentForm" class="grid grid-cols-1 md:grid-cols-3 gap-4">
         
         <div>
@@ -86,7 +90,7 @@
         </div>
 
         <div class="md:col-span-3 text-right mt-2">
-          <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-md shadow-sm transition">Guardar Alumno</button>
+          <button type="submit" id="btnSubmit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-md shadow-sm transition">Guardar Alumno</button>
         </div>
       </form>
     </section>
@@ -108,7 +112,7 @@
       </div>
     </section>
 
-    <!-- LISTADO CON DATOS EXTRAÍDOS DE LA CURP -->
+    <!-- LISTADO CON ACCIONES EDITAR / ELIMINAR -->
     <section class="bg-white p-6 rounded-xl shadow-md border border-gray-100 overflow-x-auto">
       <h2 class="text-xl font-semibold mb-4 text-gray-700">Nómina del Grupo (Orden Alfabético A-Z)</h2>
       <table class="w-full text-left border-collapse text-sm">
@@ -116,10 +120,11 @@
           <tr class="bg-gray-100 border-b text-gray-600 uppercase text-xs">
             <th class="p-3">Nombre Completo</th>
             <th class="p-3">CURP</th>
-            <th class="p-3">Fecha Nacimiento</th>
+            <th class="p-3">Fecha Nac.</th>
             <th class="p-3">Sexo</th>
-            <th class="p-3">Edad Cumplida</th>
+            <th class="p-3">Edad</th>
             <th class="p-3">Tutor / Teléfono</th>
+            <th class="p-3 text-center">Acciones</th>
           </tr>
         </thead>
         <tbody id="tablaAlumnos" class="divide-y divide-gray-100">
@@ -159,10 +164,10 @@
     </section>
   </div>
 
-  <!-- SCRIPT CON FIREBASE Y ORDENAMIENTO ALFABÉTICO -->
+  <!-- SCRIPT CON FIREBASE, EDICIÓN Y ELIMINACIÓN -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     // Reemplazar con tus credenciales de Firebase
     const firebaseConfig = {
@@ -179,14 +184,13 @@
     const alumnosRef = collection(db, "alumnos");
 
     let alumnosCache = [];
+    let editingId = null;
 
     const inputFechaCorte = document.getElementById('fechaCorte');
     const labelFechaCorte = document.getElementById('labelFechaCorte');
 
-    const hoyISO = new Date().toISOString().split('T')[0];
-    inputFechaCorte.value = hoyISO;
+    inputFechaCorte.value = new Date().toISOString().split('T')[0];
 
-    // Decodificador de CURP con cálculo de edad según Fecha de Corte
     function parseCURP(curp, fechaCorteObj) {
       if (!curp || curp.length !== 18) return { fechaNac: 'N/A', sexo: 'N/A', edad: 0 };
       
@@ -210,7 +214,6 @@
       return { fechaNac, sexo, edad: edad < 0 ? 0 : edad };
     }
 
-    // Renderizar tablas con ordenamiento alfabético y fecha de corte
     function renderizarTodo() {
       const valFecha = inputFechaCorte.value;
       if (!valFecha) return;
@@ -226,7 +229,6 @@
       tablaAlumnos.innerHTML = '';
       tablaEstadistica.innerHTML = '';
 
-      // ORDENAR ALFABÉTICAMENTE DE A-Z POR NOMBRE COMPLETO
       alumnosCache.sort((a, b) => 
         (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' })
       );
@@ -237,7 +239,6 @@
       alumnosCache.forEach(al => {
         const { fechaNac, sexo, edad } = parseCURP(al.curp, fechaCorteObj);
 
-        // Llenar tabla de alumnos ordenada
         const tr = document.createElement('tr');
         tr.className = "hover:bg-gray-50";
         tr.innerHTML = `
@@ -247,10 +248,13 @@
           <td class="p-3">${sexo}</td>
           <td class="p-3 font-semibold text-indigo-700">${edad} años</td>
           <td class="p-3 text-xs">${al.tutor} (${al.telefonos})</td>
+          <td class="p-3 text-center space-x-1">
+            <button onclick="prepararEdicion('${al.id}')" class="bg-amber-100 hover:bg-amber-200 text-amber-800 font-medium text-xs px-2 py-1 rounded transition">Editar</button>
+            <button onclick="eliminarAlumno('${al.id}', '${al.nombre}')" class="bg-red-100 hover:bg-red-200 text-red-700 font-medium text-xs px-2 py-1 rounded transition">Eliminar</button>
+          </td>
         `;
         tablaAlumnos.appendChild(tr);
 
-        // Agrupar estadística por edad
         if (edad > 0) {
           if (!stats[edad]) stats[edad] = { Hombre: 0, Mujer: 0 };
           if (sexo === 'Hombre') { stats[edad].Hombre++; totH++; }
@@ -258,7 +262,6 @@
         }
       });
 
-      // Renderizar filas de estadística por edad
       Object.keys(stats).sort((a,b) => Number(a) - Number(b)).forEach(edad => {
         const h = stats[edad].Hombre;
         const m = stats[edad].Mujer;
@@ -274,13 +277,12 @@
         tablaEstadistica.appendChild(row);
       });
 
-      // Totales generales
       document.getElementById('totalHombres').textContent = totH;
       document.getElementById('totalMujeres').textContent = totM;
       document.getElementById('totalGeneral').textContent = totH + totM;
     }
 
-    // Guardar datos en Firestore
+    // Guardar o Actualizar Alumno
     document.getElementById('studentForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       
@@ -300,24 +302,79 @@
       };
 
       try {
-        await addDoc(alumnosRef, data);
-        document.getElementById('studentForm').reset();
+        if (editingId) {
+          await updateDoc(doc(db, "alumnos", editingId), data);
+          cancelarEdicion();
+        } else {
+          await addDoc(alumnosRef, data);
+          document.getElementById('studentForm').reset();
+        }
       } catch (err) {
-        console.error("Error al guardar:", err);
+        console.error("Error al procesar la solicitud:", err);
       }
     });
 
-    // Escuchar datos de Firebase en tiempo real
+    // Cargar datos en el formulario para editar
+    window.prepararEdicion = (id) => {
+      const alumno = alumnosCache.find(a => a.id === id);
+      if (!alumno) return;
+
+      editingId = id;
+      document.getElementById('formTitle').textContent = "Editar Alumno";
+      document.getElementById('nombre').value = alumno.nombre || '';
+      document.getElementById('curp').value = alumno.curp || '';
+      document.getElementById('tipoSangre').value = alumno.tipoSangre || '';
+      document.getElementById('padecimiento').value = alumno.padecimiento || '';
+      document.getElementById('alergias').value = alumno.alergias || '';
+      document.getElementById('numSeguro').value = alumno.numSeguro || '';
+      document.getElementById('tutor').value = alumno.tutor || '';
+      document.getElementById('telefonos').value = alumno.telefonos || '';
+      document.getElementById('escolaridadPadres').value = alumno.escolaridadPadres || '';
+      document.getElementById('ocupacionPadres').value = alumno.ocupacionPadres || '';
+      document.getElementById('situacionPareja').value = alumno.situacionPareja || 'Viven Juntos';
+      document.getElementById('domicilio').value = alumno.domicilio || '';
+
+      const btnSubmit = document.getElementById('btnSubmit');
+      btnSubmit.textContent = 'Actualizar Datos';
+      btnSubmit.className = 'bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-6 rounded-md shadow-sm transition';
+      document.getElementById('btnCancelar').classList.remove('hidden');
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // Confirmar y eliminar registro de Firestore
+    window.eliminarAlumno = async (id, nombre) => {
+      if (confirm(`¿Deseas eliminar permanentemente a ${nombre}?`)) {
+        try {
+          await deleteDoc(doc(db, "alumnos", id));
+          if (editingId === id) cancelarEdicion();
+        } catch (err) {
+          console.error("Error al eliminar:", err);
+        }
+      }
+    };
+
+    function cancelarEdicion() {
+      editingId = null;
+      document.getElementById('formTitle').textContent = "Registro de Alumno";
+      document.getElementById('studentForm').reset();
+      const btnSubmit = document.getElementById('btnSubmit');
+      btnSubmit.textContent = 'Guardar Alumno';
+      btnSubmit.className = 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-md shadow-sm transition';
+      document.getElementById('btnCancelar').classList.add('hidden');
+    }
+
+    document.getElementById('btnCancelar').addEventListener('click', cancelarEdicion);
+
+    // Escuchar Firestore en tiempo real guardando el ID de cada documento
     onSnapshot(alumnosRef, (snapshot) => {
-      alumnosCache = snapshot.docs.map(doc => doc.data());
+      alumnosCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       renderizarTodo();
     });
 
-    // Eventos del Selector de Fecha de Corte
     inputFechaCorte.addEventListener('change', renderizarTodo);
 
     const anioActual = new Date().getFullYear();
-    
     document.getElementById('btnInicioCiclo').addEventListener('click', () => {
       inputFechaCorte.value = `${anioActual}-09-01`;
       renderizarTodo();
@@ -335,4 +392,5 @@
 
   </script>
 </body>
+</html>
 </html>
